@@ -80,18 +80,24 @@ def get_confiramtion_keyboard():
 
 @dp.message(Command('start'))
 async def cmd_start(message: types.Message):
+    ''' start command handler '''
+
     keyboard = get_main_keyboard()
     await message.reply("Добро пожаловать в бот учета пациентов!", reply_markup=keyboard)
 
 
 @dp.message(lambda message: message.text == 'Добавить пациента')
 async def cmd_add_patient(message: types.Message, state: FSMContext):
+    ''' add patient command handler '''
+
     await state.set_state(Form.name)
     await message.reply("Введите полное имя пациента:")
 
 
 @dp.message(Form.name)
 async def process_name(message: types.Message, state: FSMContext):
+    ''' get name of the patient '''
+
     if validate_name(message.text):
         await state.update_data(name=message.text)
         await state.set_state(Form.birth_date)
@@ -102,6 +108,8 @@ async def process_name(message: types.Message, state: FSMContext):
 
 @dp.message(Form.birth_date)
 async def process_birth_date(message: types.Message, state: FSMContext):
+    ''' get birth date of the patient '''
+
     if validate_birth_date(message.text):
         await state.update_data(birth_date=message.text)
         user_data = await state.get_data()
@@ -114,6 +122,8 @@ async def process_birth_date(message: types.Message, state: FSMContext):
 
 @dp.callback_query(lambda c: c.data.startswith('confirm_'))
 async def process_confirmation(callback_query: types.CallbackQuery, state: FSMContext):
+    ''' process confirmation '''
+
     if callback_query.data == 'confirm_yes':
         user_data = await state.get_data()
         name = f'{user_data["name"]}'
@@ -138,6 +148,8 @@ async def process_confirmation(callback_query: types.CallbackQuery, state: FSMCo
 
 @dp.message(lambda message: message.text == 'Пациенты сегодня')
 async def cmd_today_patients(message: types.Message):
+    ''' get patients for today '''
+
     today = datetime.now().strftime('%Y-%m-%d')
     try:
         with conn:
@@ -157,13 +169,14 @@ async def cmd_today_patients(message: types.Message):
 
 @dp.message(lambda message: message.text == 'Статистика за неделю')
 async def cmd_weekly_stats(message: types.Message):
+    ''' get weekly statistics '''
+    
     today = datetime.now()
     week_ago = today - timedelta(days=7)
     try:
         with conn:
             result =conn.execute("SELECT visit_date, COUNT(*) FROM patients WHERE visit_date BETWEEN ? AND ? GROUP BY visit_date", (week_ago.strftime('%Y-%m-%d'), today.strftime('%Y-%m-%d')))
             stats = result.fetchall()
-        logging.info(stats)
         if stats:
             response = "Статистика за неделю:\n" + "\n".join([f"{get_day_of_week(visit_date)}: {count} {get_patient_word(count)}" for visit_date, count in stats])
         else:
