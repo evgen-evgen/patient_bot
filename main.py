@@ -28,10 +28,7 @@ logging.basicConfig(
 
 
 conn = sqlite3.connect('patients.db')
-c = conn.cursor()
-c.execute('''CREATE TABLE IF NOT EXISTS patients
-             (id INTEGER PRIMARY KEY, name TEXT, birth_date TEXT, visit_date TEXT)''')
-conn.commit()
+
 
 BOT_TOKEN = os.environ['BOT_TOKEN']
 #BOT_TOKEN = 'YOUR_BOT_TOKEN'
@@ -122,9 +119,13 @@ async def process_confirmation(callback_query: types.CallbackQuery, state: FSMCo
         name = f'{user_data["name"]}'
         birth_date = user_data['birth_date']
         visit_date = datetime.now().strftime('%Y-%m-%d')
-        c.execute("INSERT INTO patients (name, birth_date, visit_date) VALUES (?, ?, ?)", (name, birth_date, visit_date))
-        conn.commit()
-        await callback_query.message.edit_text("Пациент добавлен успешно!")
+        try:
+            with conn:
+                conn.execute("INSERT INTO patients (name, birth_date, visit_date) VALUES (?, ?, ?)", (name, birth_date, visit_date))
+            await bot.send_message(callback_query.from_user.id, "Пациент успешно добавлен!")
+        except sqlite3.Error as e:
+            logging.error(f"Ошибка при записи в базу данных: {e}")
+            await bot.send_message(callback_query.from_user.id, "Произошла ошибка при добавлении пациента. Пожалуйста, попробуйте еще раз.")
         await state.clear()
     else:
         await callback_query.message.edit_text("Операция отменена.")    
@@ -138,13 +139,18 @@ async def process_confirmation(callback_query: types.CallbackQuery, state: FSMCo
 @dp.message(lambda message: message.text == 'Пациенты сегодня')
 async def cmd_today_patients(message: types.Message):
     today = datetime.now().strftime('%Y-%m-%d')
-    c.execute("SELECT name, birth_date FROM patients WHERE visit_date = ?", (today,))
-    patients = c.fetchall()
-    if patients:
-        response = "Пациенты сегодня:\n\n" + "\n".join([f"{name},  {birth_date}" for name, birth_date in patients])
-    else:
-        response = "No patients visited today."
-    await message.reply(response)
+    try:
+        with conn:
+            result = conn.execute("SELECT name, birth_date FROM patients WHERE visit_date = ?", (today,))
+            patients = result.fetchall()
+        if patients:
+            response = "Пациенты сегодня:\n\n" + "\n".join([f"{name},  {birth_date}" for name, birth_date in patients])
+        else:
+            response = "Сегодня новых пациентов не было."
+        await message.reply(response)
+    except sqlite3.Error as e:
+        logging.error(f"Ошибка при чтении из базы данных: {e}")
+        await message.reply("Произошла ошибка при получении данных. Пожалуйста, попробуйте еще раз.")
 
 
 
@@ -153,11 +159,19 @@ async def cmd_today_patients(message: types.Message):
 async def cmd_weekly_stats(message: types.Message):
     today = datetime.now()
     week_ago = today - timedelta(days=7)
-    c.execute("SELECT visit_date, COUNT(*) FROM patients WHERE visit_date BETWEEN ? AND ? GROUP BY visit_date", (week_ago.strftime('%Y-%m-%d'), today.strftime('%Y-%m-%d')))
-    stats = c.fetchall()
-
-    response = "Статистика за неделю:\n" + "\n".join([f"{get_day_of_week(visit_date)}: {count} {get_patient_word(count)}" for visit_date, count in stats])
-    await message.reply(response)
+    try:
+        with conn:
+            result =conn.execute("SELECT visit_date, COUNT(*) FROM patients WHERE visit_date BETWEEN ? AND ? GROUP BY visit_date", (week_ago.strftime('%Y-%m-%d'), today.strftime('%Y-%m-%d')))
+            stats = result.fetchall()
+        logging.info(stats)
+        if stats:
+            response = "Статистика за неделю:\n" + "\n".join([f"{get_day_of_week(visit_date)}: {count} {get_patient_word(count)}" for visit_date, count in stats])
+        else:
+            response = "За последнюю неделю новых пациентов не было."
+        await message.reply(response)
+    except sqlite3.Error as e:
+        logging.error(f"Ошибка при чтении из базы данных: {e}")
+        await message.reply("Произошла ошибка при получении данных. Пожалуйста, попробуйте еще раз.")
 
 
 
@@ -165,6 +179,14 @@ async def cmd_weekly_stats(message: types.Message):
 
     
 async def main():
+    try:
+        with conn:
+            conn.execute('''CREATE TABLE IF NOT EXISTS patients
+                         (id INTEGER PRIMARY KEY, name TEXT, birth_date TEXT, visit_date TEXT)''')
+            conn.commit()
+    except sqlite3.Error as e:
+        logging.error(f"Ошибка при создании таблицы: {e}")
+        return
 
     await dp.start_polling(bot, skip_updates=True)
 
